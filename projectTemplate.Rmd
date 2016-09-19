@@ -1,0 +1,563 @@
+Loans by Benjamin Kuo
+========================================================
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in your analysis in this code chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk.
+# This prevents the code from displaying in the knitted HTML output.
+# You should set echo=FALSE for all code chunks in your file.
+
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(scales)
+library(memisc)
+library(alr3)
+library(RColorBrewer)
+```
+
+```{r, Load_the_Data}
+# Load the Data
+alldata <- read.csv('C:/Users/benjiekay/Desktop/Project 4/prosperLoanData.csv')
+data <- alldata[c(2:17)] #I'll explain below how I chose these variables
+
+colnames(data)[which(names(data) == "ProsperRating..numeric.")] <- "ProsperRatingNumeric"
+colnames(data)[which(names(data) == "ProsperRating..Alpha.")] <- "ProsperRatingAlpha"
+colnames(data)[which(names(data) == "ListingCategory..numeric.")] <- "ListingCategory"
+colnames(data)[which(names(data) == "EstimatedEffectiveYield")] <- "EstEffectiveYield"
+colnames(data)[which(names(data) == "EstimatedLoss")] <- "EstLoss"
+colnames(data)[which(names(data) == "EstimatedReturn")] <- "EstReturn"
+
+#now I split the data before/after July 2009 where they abandoned CreditGrade and starts using ProsperRating
+data$ListingCreationDate <- strptime(x = data$ListingCreationDate,
+                                     format = "%Y-%m-%d")
+
+data$ClosedDate <- strptime(x = data$ClosedDate,
+                            format = "%Y-%m-%d")
+
+#Convert Listing category from numeric to text
+data$ListingCategory = factor(data$ListingCategory,
+                              labels = c("Not Available",
+                                         "Debt Consolidation",
+                                         "Home Improvement",
+                                         "Business", 
+                                         "Personal Loan",
+                                         "Student Use", 
+                                         "Auto",
+                                         "Other", 
+                                         "Baby&Adoption",
+                                         "Boat", 
+                                         "Cosmetic Procedure",
+                                         "Engagement Ring", 
+                                         "Green Loans",
+                                         "Household Expenses", 
+                                         "Large Purchases",
+                                         "Medical/Dental",
+                                         "Motorcycle",
+                                         "Rv", 
+                                         "Taxes",
+                                         "Vacation",
+                                         "Wedding Loans"))
+
+pre09 <- subset(data,
+                ListingCreationDate$year < 109 & ListingCreationDate$mon < 6)
+post09 <- subset(data,
+                 ListingCreationDate$year >= 109 & ListingCreationDate$mon >= 6)
+#I name the data pre/post09 but really the seperator is July 09, when they go from using "CreditGrade" to "ProsperScore"
+
+str(post09)
+summary(post09)
+```
+
+At first I had difficulty narrowing down the variables I wanted to look at out of the 81, since most of them would be a factor in the default rate, but then I realize since the ratings/scores are basically a composite of the other variables, they are what I should be looking at since my mission, EDA, is probably not to derive an algorithem to determine the score from more than 60 variables. 
+
+
+# Univariate Plots Section
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = BorrowerRate, bins = 50) +
+  coord_cartesian(xlim = c(0.0, 0.35))
+
+summary(post09$BorrowerRate)
+```
+
+The BorrowerRate, should be a direct function of the borrowers ratings, looks to be rather normalized from 5% to 30%, except for the huge spike (also the mode of the distribution) at 32%, which is not only higher than the 3rd Q 26%, but also very close to the Max 36%.
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = LenderYield, bins = 50) +
+  coord_cartesian(xlim = c(0.0, 0.35))
+
+summary(post09$LenderYield)
+```
+
+Expected, LenderYield follows similar pattern
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = EstReturn, bins = 50) +
+  coord_cartesian(xlim = c(0.0, 0.35))
+
+summary(post09$EstReturn)
+```
+
+EstReturn, however, has a distribution that's very close to a normal distribution, without the huge spike at the tail.
+
+Conventional thinking would say the distribution of ratings would match that of interest rates
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = ProsperRatingNumeric) +
+  scale_x_continuous(breaks = 1:10)
+```
+
+ProsperRatingNumeric has a normal distribution, with no signs of the odd spike in the tail end
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = ProsperScore) +
+  scale_x_continuous(breaks = 1:11)
+```
+
+Neither does ProsperScore
+
+Of the rates above 30%, what's their PRating and PScore like?
+
+```{r echo=FALSE, warning=FALSE}
+above30 <- subset(post09, post09$BorrowerRate > 0.3)
+qplot(data = above30, x = ProsperRatingNumeric) +
+  scale_x_continuous(breaks = 1:10)
+```
+
+This makes sense
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = above30, x = ProsperScore) +
+  scale_x_continuous(breaks = 1:11)
+```
+
+This does not, however from the previous plot we can suspect BorrowerRate should be a direct function of PRating (case basis) instead of PScore (individual basis)
+
+Let's look at the borrower rates for the worst ratings and scores
+
+```{r echo=FALSE, warning=FALSE}
+prating1and2 <- subset(post09, post09$ProsperRatingNumeric < 3)
+pscore3under <- subset(post09, post09$ProsperScore < 4)
+pscore4over <- subset(post09, post09$ProsperScore > 3)
+
+qplot(data = prating1and2, x = BorrowerRate, main = 'PRating under 3')
+
+qplot(data = pscore3under, x = BorrowerRate, main = 'PScore under 4')
+```
+
+Both low PRating and PScore reflect similar distribution with the most of the data having that huge spike at 31%-32% range
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = pscore4over, x = BorrowerRate, main = 'PScore 4 and above')
+summary(pscore4over$BorrowerRate)
+```
+
+However even when PScore is 4 and above, the 32% spike still exists
+
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+So the dataset I'm looking at contains 46120 obvservations and 16 variables.
+
+### What is/are the main feature(s) of interest in your dataset?
+The relationship that I'll be exploring mainly, but not exclusively, is the one between the various ratings and borrower rate, since the ratings are a result of assessment on the borrowers.
+
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+The lender's rate and listing categories.
+
+### Did you create any new variables from existing variables in the dataset?
+I narrow down the focus on the spike of data with around 32% interest rate, and further explore subsets of low PRating and low PScore.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+First we can see the bulk of the BorrowerRate is between 10% to 20%, however there's a huge spike at around 32% which is the mode, without it the distribution would have been rather normalized.
+
+
+# Bivariate Plots Section
+```{r echo=FALSE, Bivariate_Plots}
+round(cor(post09[c(7:13, 15)]), 3)
+```
+
+We see some highly correlated variables, especially BorrowerRate and LenderYield.
+Previously raised question of ProsperScore has about the lowest correlation among the other variables, typically aroun -0.6, its corr with EstimatedReturn is as low as -0.34, the lowest of all correlations.
+
+The correlation between EstimateLoss and EstimatedReturn also have a rather low correlation of 0.53.
+
+The following graph would appear more clearly with "Zoom" button or in Knitr
+
+```{r, fig.width=12, fig.height=8, echo=FALSE, warning=FALSE}
+ggpairs(post09[c(8, 10:13, 15)], 
+        lower = list(continuous = wrap("points", shape = I('.'))), 
+        upper = list(combo = wrap("box", outlier.shape = I('.'))))
+```
+
+1. There's a lot of overlap of BorrowerRate among the PScores, meaning a 30% is not an outlier from PScore 1 to 7, 10% can also be seen as common in 3 as in 11. As for PRating, not only is corr a lot higher (0.95 with Borrower Rate), the range is also a lot smaller
+2. One other interesting graph is the distribution between EstimatedEffectiveYield and EstimatedReturn. There's a perfect 1 (corr) and also a branched out huge chunk.
+3. Also if we look at the diagonal plots from top left to bottom right, which show univariate distributions, it shows something I missed earlier, which is the distribution of EstimatedLoss and EstimateReturn, that doesn't have the tail spike that the Borrower/Lender rates has.
+
+Let's look at 2 and 3 first before we go back to the main topic 1.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(data = post09, aes(x = EstEffectiveYield, y = EstReturn)) +
+  geom_point()
+```
+
+That's two VERY distinct groups, should definitely check that out in multivariate later.
+
+and for 3
+
+```{r echo=FALSE, warning=FALSE}
+qplot(data = post09, x = EstLoss, bins = 50)
+```
+
+The peak(Mode) of EstLoss is not at the tail end like the BorrowerRate. However 15-17% is still strangely higher than 13-15%.
+
+Back to 1, PScore and BorrowrRate
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(factor(ProsperScore), BorrowerRate), data = post09 ) + 
+  geom_boxplot() + 
+  stat_summary(fun.y=mean,col='red',geom='point')
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(factor(ProsperRatingNumeric), BorrowerRate), data = post09 ) +
+  geom_boxplot() +
+  stat_summary(fun.y=mean,col='red',geom='point')
+```
+
+In boxplot, the trend looks rather neat, outside of PScore 5 which shows a break in the trend (higher median, mode and quartile), there's a clear trend. From the fact that the range between 15% and 30% would not be outliers from PScore 2 to 8, means the spread is big.
+
+But when looking at PRating, the range gets significantly smaller.
+
+Dissapointedly, neither Boxplots show the odd concentration at 32%, let's try geom_jitter.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperScore, y = BorrowerRate), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  geom_smooth(method = 'lm', color = 'red')
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = BorrowerRate), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  geom_smooth(method = 'lm', color = 'red')
+
+```
+
+Above we see the unnatural concentration of 32% from PScore 1-6 and it dissappears abruptly at 7. I hope multivariate can tell us more about 32%.
+
+With PRating we can see the concentration of 32% at PRating 1 and 2.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperScore, y = ProsperRatingNumeric), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  geom_smooth(method = 'lm', color = 'red')
+```
+
+Even though we gathered from the previous plots that the number of 32% drops off at PScore-7, from this graph we can see, that is likely because the number of PRating-2 drops of at PScore-7, this all but confirms that BorrowerRate is a direct function of PRating and less of one of PScore.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = EstEffectiveYield), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  stat_summary(fun.y=mean, col='red',geom='point')
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = EstLoss), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  stat_summary(fun.y=mean, col='red',geom='point')
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = EstReturn), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_x_continuous(breaks = 1:11) +
+  stat_summary(fun.y=mean, col='red',geom='point')
+```
+
+Looking at the relationship between PRating and EEY/EL/ER, we can see how from PR1 to PR7 the distribution goes from top heavy to bottom heavy, with PR3 having about equal outliers on either side. However, outliers aside, PR1 seems to behaves differently from the others, its top end looks to be capped too low and out of the trend. Let's switch to the boxplot for another view.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(factor(ProsperRatingNumeric), EstReturn), data = post09 ) +
+  geom_boxplot() +
+  stat_summary(fun.y=mean,col='red',geom='point')
+```
+
+Looking at PR1 here, while its outliers, median and 3rd quartile(bottom of the box) seems to follow the overall trend, its mean and 1st quartile (top of the box) doesn't. One could argue the mean was dragged down by the big number of downside outliers. However that doesn't explain why its top end seems to be capped at about 14% when through PR7 to PR2 it's increasing until it falls off a cliff at PR1. Could lender be irrationaly undervaluing PR1, or was there a hardcap mechanism specifically for PR1, which would not make sense since lenders would be expecting higher return for higher risk.
+
+
+To further explore bulkiness at 32%, we look at some other categorical variable, below is LoanStatus
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = LoanStatus, y = BorrowerRate), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_y_continuous(breaks = c(0,0.1, 0.15, 0.20, 0.25, 0.3, 0.35)) +
+  theme(axis.text.x  = element_text(angle=45, vjust=0.5, size=8))
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(LoanStatus, BorrowerRate), data = post09 ) +
+  geom_boxplot() +
+  stat_summary(fun.y=mean,col='red',geom='point') +
+  theme(axis.text.x  = element_text(angle=45, vjust=0.5, size=8))
+```
+
+We can see a high concentration of 32% especially the chargedoff, defaulted, and completed loans.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ListingCategory, y = BorrowerRate), data = post09 ) +
+  geom_jitter(alpha = 1/20) +
+  scale_y_continuous(breaks = c(0,0.1, 0.15, 0.20, 0.25, 0.3, 0.35)) +
+  theme(axis.text.x  = element_text(angle=45, vjust=0.5, size=8))
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(ListingCategory, BorrowerRate), data = post09 ) +
+  geom_boxplot() +
+  stat_summary(fun.y=mean,col='red',geom='point') +
+  theme(axis.text.x  = element_text(angle=60, vjust=0.5, size=8))
+```
+
+Almost across all the categories(that has enough data), there's a high amount of 32%, and the first five categories also shows bulk at 35%, all these seems too artificial. I wouldn't be surprised if a hard cap has been set at 32% for all, and some 35% exceptions.
+
+I found it interesting the highest average rate is Household expense, and the lowest is Boat. Two ends of the luxury/essential spectrum?
+
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. How did the feature(s) of interest vary with other features in the dataset?
+
+Borrower/Lender Rates correlates strongly with PRating yet with PScore it would show a lot more variation. 
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+The graph between EstEffectiveYield and EstReturn shows two VERY distinctive groups.
+
+
+### What was the strongest relationship you found?
+While BorrowerRate and LenderYield has a perfect 1 corr, that's more of a given and less interesting.
+PRating has up to 0.95 corr with both BorrowerRate and EstLoss
+
+
+
+# Multivariate Plots Section
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = EstEffectiveYield, y = EstReturn), data = post09) + 
+  geom_point(alpha = 0.5, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer() +
+  theme_dark()
+```
+
+back to looking at EstReturn and EstEffectiveYield and its plot that shows two distinct groups, one being a perfect corr 1 line. We can see how the PRating relates to each group oppositely, where on the corr 1 line, the higher the Pscore, the higher the EstReturn/EstEY. For the other group, the opposite applies, the higher the PScore, the lower the ER/EEY. One thing to not is that there doesn't seem to be anything higher then PR4 in the corr-1 line.
+
+Not only was that contradictory, it also doesn't help us identify which variable distinguishes the two groups.
+
+```{r echo=FALSE, warning=FALSE}
+
+post09$LoanStatus <- factor(post09$LoanStatus,
+                            levels = c("Completed",
+                                       "FinalPaymentInProgress",
+                                       "Current",
+                                       "Past Due (1-15 days)",
+                                       "Past Due (16-30 days)",
+                                       "Past Due (31-60 days)",
+                                       "Past Due (61-90 days)",
+                                       "Past Due (91-120 days)",
+                                       "Past Due (>120 days)",
+                                       "Chargedoff",
+                                       "Defaulted"))
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = EstEffectiveYield, y = EstReturn), data = post09) +
+  geom_point(alpha = 1, size = 1, aes(color = LoanStatus)) +
+  scale_color_brewer(type = 'div')
+```
+
+LoanStatus tells us a lot more. We can see all the data in the perfect corr 1 line are ones that are loans that are no longer active, either "Completed", "Chargedoff" or "Defaulted". While none of the active loans are in the straight line, some inactive loans are also not in the straight line. Which begs the question, by definition EstReturn was assigned to the loan when the loan is created, but this chart simply shows there must've been some adjustments made when a loan becomes inactive, yet not along the way, to cause the unnatural straight line. I found no explanation of the on the Prosper website but it could be something to ask specifically.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = EstLoss, y = EstReturn), data = post09) +
+  geom_point(alpha = 1, size = 1, aes(color = LoanStatus)) +
+  scale_color_brewer(type = 'div')
+```
+
+Let's look at EstLoss, another variable in the formula of (EstEffectiveYield - EstLoss = EstReturn)
+From the many vertical straight lines, we can clearly see that for the inactive loans, the EstLoss is rather discrete (preset?) than continous. Here, just like the previous plot, we clear instinctions between active/inactive loans.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = EstLoss, y = EstReturn), data = post09) +
+  geom_point(alpha = 1, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer()
+```
+
+EstLoss seems to be a direct function of the PRating (soley)! From that we can deduce that BorrowerRate/EstEffectiveRate is where the discretionary happens.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = LoanStatus , y = BorrowerRate), data = post09) +
+  geom_jitter(alpha = 0.1, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer(name = "ProsperRatingNumeric") +
+  theme(axis.text.x = element_text(angle=60, vjust=0.5, size=8))
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = LoanStatus , y = EstEffectiveYield), data = post09) +
+  geom_jitter(alpha = 0.1, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer(name = "ProsperRatingNumeric") +
+  theme(axis.text.x  = element_text(angle=60, vjust=0.5, size=8))
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = LoanStatus , y = EstReturn), data = post09) +
+  geom_jitter(alpha = 0.1, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer(name = "ProsperRatingNumeric") +
+  theme(axis.text.x = element_text(angle=60, vjust=0.5, size=8))
+```
+
+The three plots here tells a bit of a story. BorrowerRate is the most straight forward. EEY is BorrowerRate after discounting fees and uncollected interest. EstReturn is EEY after discounting EstLoss. 
+
+From the first two plots we can see, going from BorrowerRate to EEY, the range of the data gets squeezed a little bit from the top down, the top goes from 32%+ to 26%+, while the bottom of the data (dark green) remains largely unchanged going only from 6% to 5%.
+
+Note the biggest difference between the two plots is only seen in the inactive loans (completed, defaulted and charged-off) where we see some PR1 goes from 32% to as low as -20%.
+
+The third plot, EstReturn, gets more interested. While the bands expectedly get even more squeezed from the top down, what's less expected is the distribution of the colors, where the dark-brown (PR1) is now more concentrated in the middle of the band instead of on top, which goes against logic, why would PR1 have an EstReturn that's in the middle between PR2 and PR7. Since the difference between the 2nd and 3rd plot is EstLoss, can we suspect that the EstLoss of PR1 is overestimated? 
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = BorrowerRate), data = post09) +
+  geom_jitter(alpha = 0.5, size = 1, aes(color = LoanStatus)) +
+  scale_color_brewer(type = 'div')
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = ProsperRatingNumeric, y = EstReturn), data = post09) +
+  geom_jitter(alpha = 0.5, size = 1, aes(color = LoanStatus)) +
+  scale_color_brewer(type = 'div')
+```
+
+The above two plots we've looked at in Bivariate, and now breaking them down by LoanStatus. While we can now see that all the bunching are of the inactive loans, also their rates seem to be more arbitrary. Still we aren't able to tell why PR1 is behaves differently from the trend, regardless of active/inactive atatus.
+
+Since the inactive loans appears to have arbitrary EstReturn, until we find out more about the adjustment mechanism upon "completing" a loan, they're not that helpful in terms of help predicting return. Let's look at the data again with only active loans.
+
+```{r}
+post09active <- subset(post09,
+                       LoanStatus != "Completed" &
+                         LoanStatus != "Chargedoff" &
+                         LoanStatus != "Defaulted")
+
+post09inactive <- subset(post09,
+                         LoanStatus == "Completed" |
+                           LoanStatus == "Chargedoff" |
+                           LoanStatus == "Defaulted")
+```
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = BorrowerRate, y = EstReturn), data = post09active) +
+  geom_jitter(alpha = 0.5, size = 1, aes(color = factor(ProsperRatingNumeric))) +
+  scale_color_brewer(name = "ProsperRatingNumeric") +
+  ggtitle('Active loans only') +
+  theme_dark()
+```
+
+We see about 6-8 distinguished curves. Obvs the top one would indicat the best return for similar BorrowerRate. Surprising PRating is not the distinct factor of each curve, although we do see the relationship between the rating and return.
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(aes(x = BorrowerRate, y = EstReturn), data = post09active) +
+  geom_jitter(alpha = 0.5, size = 1, aes(color = factor(Term))) +
+  scale_color_brewer(name = "Term(month") +
+  ggtitle('Active loans only') +
+  theme_dark()
+```
+
+Running out of relevant variables, I factor in Term (length of term), which seems to be able to break the curves into two groups, and is a pretty good indicator of which curves the data would lie on. From that we can roughly deduce, given the same BorrowerRate, the longer the term the better the EstReturn. 
+
+It would have been best to find the variable that distinguish the six curves. While Term only gives us only two, it's as good as I can find at the moment. 
+
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+There are two very distinct groups of data, one is discrete and the other continuous. While most of the signs points to it being Active/Inactive, it's not conclusive since half of Inactive data also follows the "continuous" pattern seen in Active. We do know none of the Active data follows the "discrete" pattern that can only be seen in Inactive data. Further efforts will have to be made in identifying which variable that's causing the "discrete" pattern.
+
+### Were there any interesting or surprising interactions between features?
+The variable Term (length of the loan) is more relevant than I had presumed. 
+
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+
+```{r echo=FALSE, Plot_One}
+ggplot(aes(x = EstEffectiveYield, y = EstReturn),
+       data = post09) +
+  geom_point(alpha = 0.5,
+             size = 1,
+             aes(color = factor(Term))) +
+  scale_color_brewer(name = "Term(month)") +
+  theme_dark() +
+  geom_smooth(color = 'red')
+```
+
+
+### Description One
+Back to the previous EEY/ER chart but this time colored with Term. We can easily see all the "discrete data" is not only inactive, but all of them 36-month term. Although there are still 36-month data that doesn't fall on the straight line, further efforts can be made on narrowing down what other variables only apply to 36-month data. Also why is there no active 12-month loans?
+
+### Plot Two
+```{r echo=FALSE, Plot_Two}
+ggplot(aes(x = ProsperRatingNumeric , y = EstReturn),
+       data = post09) +
+  geom_jitter(alpha = 0.5,
+              size = 1,
+              aes(color = factor(Term))) +
+  scale_color_brewer(name = "Term(month)") +
+  theme_dark() +
+  geom_smooth(method = 'lm', color = 'red') +
+  ggtitle('All loans (Active and Inactive)')
+```
+
+### Description Two
+This chart also makes more sense now that Term is considered, we can see only 36-month terms have been rated PR1, and 12-month terms explains the bunching at the bottom. We can now attribute some of the "dicrete" patterns to Term being discrete (only three fixed terms) instead of continuous. However, we still have yet to find out why PR1 doesn't havea higher EstReturn than PR2 even considering only 36-month terms.
+
+### Plot Three
+```{r echo=FALSE}
+ggplot(aes(x = ProsperRatingNumeric , y = EstReturn), data = post09active) +
+  geom_jitter(alpha = 0.5, size = 1, aes(color = factor(Term))) +
+  scale_color_brewer(name = "Term(month)") +
+  theme_dark() +
+  geom_smooth(method = 'lm', color = 'red') +
+  ggtitle('Active Loans Only')
+```
+
+
+### Description Three
+To filter out possible policy changes within the perioud that might have created noise to the previous plot, we now subset only the active loans. This plot gives us some clarity to the floor of EstReturn for each PR, but also begs for questions on the seemingly artificial caps of EstReturn on 36-month PR1 and 60-month PR2. A confirmation and explanation from Prosper would be helpful since it's not intuitive why PR3 would have the highest potential return, higher than PR2 and PR4. Or should it be a liberty of potential lenders chasing higher potential returns to give 60-month loans to PR1?
+
+
+
+------
+
+# Reflection
+
+I utilized the data from the point of view of a potential lender. What would be my potential return given the different levels of risk that I could take.
+
+Not knowing which variables to focus on besides EstReturn, caused me to spend some time on exploring variable that I assumed would be more relevant (PScore), and also missed out on more important variables until later in the analysis (Term). 
+
+In the most general sense, the common basis of finance still stands; The longer term and bigger risk, and the bigger expected reward. However there are some prominent patterns outside that curve.
+
+While the biggest mystery, why certain data appears more discrete and arbitrary than continuous, has not been solved. We have narrowed down some specific questions and I'm certain with some queries to and answers from Prosper, such as Why is there only 36-month terms for PR1, yet not 12-month nor 60-month? Why is there no Current ongoing loans that has EstReturn = EstEffectiveYield? Why is there almost no active loans of 12-month?
+
+We would be able to isolate those variables and be able to build a better model once those questions are answered.
